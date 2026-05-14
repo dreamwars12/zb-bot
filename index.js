@@ -2,9 +2,9 @@ const {
   Client,
   GatewayIntentBits,
   ActionRowBuilder,
+  StringSelectMenuBuilder,
   ButtonBuilder,
   ButtonStyle,
-  StringSelectMenuBuilder,
   EmbedBuilder,
   ChannelType,
   PermissionsBitField
@@ -18,10 +18,18 @@ const client = new Client({
   ]
 });
 
-// 🔧 CONFIG
-const TICKET_CATEGORY_NAME = "TICKETS";
-const STAFF_ROLE_ID = null;
+/* =========================
+   ⚙️ CONFIG ROLES
+========================= */
+const CATEGORY_NAME = "🎫・TICKETS";
 
+// 🔥 RÔLES À PING
+const ROLE_SUPPORT = "🔍 Support";
+const ROLE_STAFF = "🧪 Staff Test";
+
+/* =========================
+   🤖 READY
+========================= */
 client.once("ready", () => {
   console.log(`✅ Bot connecté : ${client.user.tag}`);
 });
@@ -34,31 +42,33 @@ client.on("messageCreate", async (message) => {
 
   if (message.content === "!ticket") {
     const embed = new EmbedBuilder()
-      .setTitle("🎫 Support Tickets")
-      .setDescription("Choisis une catégorie pour ouvrir un ticket")
-      .setColor("Blue");
+      .setTitle("🎫 Support Center")
+      .setDescription(
+        "Bienvenue dans le support.\n\n" +
+        "📌 Choisis une catégorie ci-dessous pour ouvrir un ticket\n\n" +
+        "🔍 Support → Aide générale\n" +
+        "🐛 Bug → Problème technique\n" +
+        "📩 Autre → Divers"
+      )
+      .setColor("#2b2d31")
+      .setFooter({ text: "Système de support automatisé" });
 
     const menu = new StringSelectMenuBuilder()
       .setCustomId("ticket_menu")
-      .setPlaceholder("📌 Choisis une catégorie")
+      .setPlaceholder("📌 Choisis une catégorie de ticket")
       .addOptions([
         {
-          label: "Support",
-          description: "Aide générale",
+          label: "🔍 Support",
+          description: "Aide générale du serveur",
           value: "support"
         },
         {
-          label: "Bug / Problème",
+          label: "🐛 Bug / Problème",
           description: "Signaler un bug",
           value: "bug"
         },
         {
-          label: "Recrutement",
-          description: "Rejoindre le staff",
-          value: "recrutement"
-        },
-        {
-          label: "Autre",
+          label: "📩 Autre",
           description: "Autres demandes",
           value: "autre"
         }
@@ -66,7 +76,7 @@ client.on("messageCreate", async (message) => {
 
     const row = new ActionRowBuilder().addComponents(menu);
 
-    return message.channel.send({
+    message.channel.send({
       embeds: [embed],
       components: [row]
     });
@@ -78,25 +88,33 @@ client.on("messageCreate", async (message) => {
 ========================= */
 client.on("interactionCreate", async (interaction) => {
 
-  /* 🎫 MENU TICKET */
+  /* =========================
+     🎫 CREATE TICKET
+  ========================= */
   if (interaction.isStringSelectMenu() && interaction.customId === "ticket_menu") {
     const type = interaction.values[0];
-
     const guild = interaction.guild;
 
-    // trouver ou créer catégorie
+    // 🔥 trouver/créer catégorie
     let category = guild.channels.cache.find(
-      c => c.name === TICKET_CATEGORY_NAME && c.type === ChannelType.GuildCategory
+      c => c.name === CATEGORY_NAME && c.type === ChannelType.GuildCategory
     );
 
     if (!category) {
       category = await guild.channels.create({
-        name: TICKET_CATEGORY_NAME,
+        name: CATEGORY_NAME,
         type: ChannelType.GuildCategory
       });
     }
 
-    // créer ticket
+    // 🎯 PING SELON CATÉGORIE
+    let pingRole = "";
+
+    if (type === "support") pingRole = ROLE_SUPPORT;
+    if (type === "bug") pingRole = ROLE_STAFF;
+    if (type === "autre") pingRole = ROLE_SUPPORT;
+
+    // 🎫 création salon
     const channel = await guild.channels.create({
       name: `ticket-${type}-${interaction.user.username}`,
       type: ChannelType.GuildText,
@@ -113,30 +131,32 @@ client.on("interactionCreate", async (interaction) => {
             PermissionsBitField.Flags.SendMessages,
             PermissionsBitField.Flags.ReadMessageHistory
           ]
-        },
-        ...(STAFF_ROLE_ID
-          ? [{
-              id: STAFF_ROLE_ID,
-              allow: [
-                PermissionsBitField.Flags.ViewChannel,
-                PermissionsBitField.Flags.SendMessages,
-                PermissionsBitField.Flags.ReadMessageHistory
-              ]
-            }]
-          : [])
+        }
       ]
     });
 
-    // bouton fermer
+    // 🔒 bouton fermer
     const closeBtn = new ButtonBuilder()
-      .setCustomId("ticket_close")
+      .setCustomId("close_ticket")
       .setLabel("🔒 Fermer le ticket")
       .setStyle(ButtonStyle.Danger);
 
     const row = new ActionRowBuilder().addComponents(closeBtn);
 
+    // 🎨 EMBED ULTRA PROPRE
+    const embed = new EmbedBuilder()
+      .setTitle("🎫 Nouveau Ticket")
+      .setDescription(
+        `👤 Utilisateur : <@${interaction.user.id}>\n` +
+        `📌 Type : **${type.toUpperCase()}**\n\n` +
+        `👮 Support assigné : ${pingRole ? `<@&${pingRole}>` : "Aucun"}`
+      )
+      .setColor("#00a8ff")
+      .setFooter({ text: "Système de support automatique" });
+
     await channel.send({
-      content: `🎫 Ticket **${type}** de <@${interaction.user.id}>`,
+      content: pingRole ? `<@&${pingRole}>` : "",
+      embeds: [embed],
       components: [row]
     });
 
@@ -146,8 +166,10 @@ client.on("interactionCreate", async (interaction) => {
     });
   }
 
-  /* 🔒 CLOSE TICKET */
-  if (interaction.isButton() && interaction.customId === "ticket_close") {
+  /* =========================
+     🔒 CLOSE TICKET
+  ========================= */
+  if (interaction.isButton() && interaction.customId === "close_ticket") {
     await interaction.reply("🔒 Fermeture du ticket...");
 
     setTimeout(() => {
