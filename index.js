@@ -4,6 +4,7 @@ const {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
+  StringSelectMenuBuilder,
   EmbedBuilder,
   ChannelType,
   PermissionsBitField
@@ -19,7 +20,6 @@ const client = new Client({
 
 // 🔧 CONFIG
 const TICKET_CATEGORY_NAME = "TICKETS";
-// (optionnel) mets l’ID du rôle staff ici
 const STAFF_ROLE_ID = null;
 
 client.once("ready", () => {
@@ -35,15 +35,36 @@ client.on("messageCreate", async (message) => {
   if (message.content === "!ticket") {
     const embed = new EmbedBuilder()
       .setTitle("🎫 Support Tickets")
-      .setDescription("Clique sur le bouton ci-dessous pour ouvrir un ticket")
+      .setDescription("Choisis une catégorie pour ouvrir un ticket")
       .setColor("Blue");
 
-    const button = new ButtonBuilder()
-      .setCustomId("ticket_create")
-      .setLabel("Créer un ticket")
-      .setStyle(ButtonStyle.Primary);
+    const menu = new StringSelectMenuBuilder()
+      .setCustomId("ticket_menu")
+      .setPlaceholder("📌 Choisis une catégorie")
+      .addOptions([
+        {
+          label: "Support",
+          description: "Aide générale",
+          value: "support"
+        },
+        {
+          label: "Bug / Problème",
+          description: "Signaler un bug",
+          value: "bug"
+        },
+        {
+          label: "Recrutement",
+          description: "Rejoindre le staff",
+          value: "recrutement"
+        },
+        {
+          label: "Autre",
+          description: "Autres demandes",
+          value: "autre"
+        }
+      ]);
 
-    const row = new ActionRowBuilder().addComponents(button);
+    const row = new ActionRowBuilder().addComponents(menu);
 
     return message.channel.send({
       embeds: [embed],
@@ -53,13 +74,14 @@ client.on("messageCreate", async (message) => {
 });
 
 /* =========================
-   🎯 INTERACTIONS BOUTONS
+   🎯 INTERACTIONS
 ========================= */
 client.on("interactionCreate", async (interaction) => {
-  if (!interaction.isButton()) return;
 
-  /* 🎫 CREATE TICKET */
-  if (interaction.customId === "ticket_create") {
+  /* 🎫 MENU TICKET */
+  if (interaction.isStringSelectMenu() && interaction.customId === "ticket_menu") {
+    const type = interaction.values[0];
+
     const guild = interaction.guild;
 
     // trouver ou créer catégorie
@@ -74,9 +96,9 @@ client.on("interactionCreate", async (interaction) => {
       });
     }
 
-    // création salon ticket
+    // créer ticket
     const channel = await guild.channels.create({
-      name: `ticket-${interaction.user.username}`,
+      name: `ticket-${type}-${interaction.user.username}`,
       type: ChannelType.GuildText,
       parent: category.id,
       permissionOverwrites: [
@@ -114,7 +136,7 @@ client.on("interactionCreate", async (interaction) => {
     const row = new ActionRowBuilder().addComponents(closeBtn);
 
     await channel.send({
-      content: `🎫 Ticket de <@${interaction.user.id}>`,
+      content: `🎫 Ticket **${type}** de <@${interaction.user.id}>`,
       components: [row]
     });
 
@@ -125,7 +147,7 @@ client.on("interactionCreate", async (interaction) => {
   }
 
   /* 🔒 CLOSE TICKET */
-  if (interaction.customId === "ticket_close") {
+  if (interaction.isButton() && interaction.customId === "ticket_close") {
     await interaction.reply("🔒 Fermeture du ticket...");
 
     setTimeout(() => {
