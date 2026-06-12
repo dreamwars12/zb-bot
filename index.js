@@ -5,7 +5,8 @@ const {
   EmbedBuilder,
   ActionRowBuilder,
   ButtonBuilder,
-  ButtonStyle
+  ButtonStyle,
+  PermissionsBitField
 } = require("discord.js");
 
 const Parser = require("rss-parser");
@@ -17,7 +18,8 @@ const client = new Client({
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.GuildMessageReactions,
-    GatewayIntentBits.GuildMembers
+    GatewayIntentBits.GuildMembers,
+    GatewayIntentBits.MessageContent
   ],
   partials: [Partials.Message, Partials.Channel, Partials.Reaction]
 });
@@ -27,6 +29,7 @@ const parser = new Parser();
 const NEWS_CHANNEL_ID = process.env.CHANNEL_ID;
 const REGLEMENT_CHANNEL_ID = process.env.REGLEMENT_CHANNEL_ID;
 const ANNOUNCE_CHANNEL_ID = process.env.ANNOUNCE_CHANNEL_ID;
+const LOG_CHANNEL_ID = process.env.LOG_CHANNEL_ID;
 const MEMBER_ROLE_ID = process.env.MEMBER_ROLE_ID;
 
 const TWITCH_USERNAME = process.env.TWITCH_USERNAME;
@@ -36,6 +39,26 @@ const TWITCH_CLIENT_SECRET = process.env.TWITCH_CLIENT_SECRET;
 let postedNews = new Set();
 let twitchToken = null;
 let wasLive = false;
+
+const spamMap = new Map();
+const joinTimes = [];
+
+function isStaff(member) {
+  return member.permissions.has(PermissionsBitField.Flags.Administrator);
+}
+
+async function sendLog(title, description, color = 0xff0000) {
+  const channel = await client.channels.fetch(LOG_CHANNEL_ID).catch(() => null);
+  if (!channel) return;
+
+  const embed = new EmbedBuilder()
+    .setTitle(title)
+    .setDescription(description)
+    .setColor(color)
+    .setTimestamp();
+
+  channel.send({ embeds: [embed] }).catch(() => {});
+}
 
 function cleanText(text) {
   if (!text) return "";
@@ -51,18 +74,10 @@ function cleanText(text) {
 function translateTitle(title) {
   const t = title.toLowerCase();
 
-  if (t.includes("season") && t.includes("courtside report")) {
-    return "Rapport officiel de saison NBA 2K26";
-  }
-  if (t.includes("patch notes")) {
-    return "Notes de mise à jour NBA 2K26";
-  }
-  if (t.includes("festival")) {
-    return "Événement spécial NBA 2K26";
-  }
-  if (t.includes("event")) {
-    return "Nouvel événement NBA 2K26";
-  }
+  if (t.includes("patch notes")) return "Notes de mise à jour NBA 2K26";
+  if (t.includes("season") && t.includes("courtside report")) return "Rapport officiel de saison NBA 2K26";
+  if (t.includes("festival")) return "Événement spécial NBA 2K26";
+  if (t.includes("event")) return "Nouvel événement NBA 2K26";
 
   return title;
 }
@@ -71,23 +86,23 @@ function explainNews(title, text) {
   const content = `${title} ${text}`.toLowerCase();
 
   if (content.includes("patch") || content.includes("notes")) {
-    return "Cette actu parle d’une mise à jour : corrections de bugs, équilibrage gameplay, stabilité ou changements dans certains modes.";
+    return "Mise à jour : corrections de bugs, ajustements gameplay, stabilité ou changements dans certains modes.";
   }
 
   if (content.includes("season")) {
-    return "Cette actu parle d’une nouvelle saison : récompenses, niveaux, événements, vêtements, animations et nouveautés MyCAREER/MyTEAM.";
+    return "Nouvelle saison : récompenses, niveaux, événements, vêtements, animations ou contenu MyCAREER/MyTEAM.";
   }
 
   if (content.includes("festival") || content.includes("event")) {
-    return "Cette actu parle sûrement d’un événement limité : XP, VC, récompenses spéciales ou défis à faire pendant une durée limitée.";
+    return "Événement limité : XP, VC, récompenses spéciales ou défis disponibles pendant une durée limitée.";
   }
 
   if (content.includes("myteam")) {
-    return "Cette actu concerne surtout MyTEAM : cartes, packs, défis, récompenses ou événements liés au mode.";
+    return "Actu MyTEAM : cartes, packs, défis, récompenses ou événements du mode.";
   }
 
   if (content.includes("mycareer") || content.includes("city")) {
-    return "Cette actu concerne MaCarrière / La Ville : quêtes, récompenses, événements ou nouveautés pour ton joueur.";
+    return "Actu MaCarrière / Ville : quêtes, récompenses, événements ou nouveautés pour ton joueur.";
   }
 
   return "Nouvelle information NBA 2K26 détectée automatiquement.";
@@ -104,26 +119,26 @@ async function postReglement() {
     .setTitle("👑 LE TERRAIN DES ROIS — ACCÈS AU SERVEUR")
     .setDescription(
       "🏀 **Bienvenue sur Le Terrain des Rois**\n" +
-      "La communauté gaming autour de **NBA 2K26, Fortnite et FiveM**.\n\n" +
+      "Communauté **NBA 2K26 • Fortnite • FiveM**\n\n" +
       "━━━━━━━━━━━━━━━━━━━━━━\n\n" +
       "📜 **RÈGLEMENT OFFICIEL**\n\n" +
       "✅ **Respect obligatoire**\n" +
-      "Respecte tous les membres. Pas d’insultes graves, menaces ou harcèlement.\n\n" +
+      "Aucune insulte grave, menace, harcèlement ou provocation abusive.\n\n" +
       "🚫 **Spam / Pub interdit**\n" +
-      "Pas de flood, liens suspects, pubs sauvages ou arnaques.\n\n" +
-      "🏀 **Salons adaptés**\n" +
-      "Utilise les bons salons : actus, build-lab, pro-am, highlights, annonces.\n\n" +
+      "Pas de flood, pub sauvage, liens suspects ou arnaques.\n\n" +
+      "🏀 **Utilise les bons salons**\n" +
+      "Builds, Pro-Am, clips, actus, annonces, FiveM, Fortnite.\n\n" +
       "💸 **Arnaques interdites**\n" +
       "VC fake, faux giveaways, vente de comptes ou scams = sanction.\n\n" +
       "🛡️ **Respect du staff**\n" +
       "Les décisions du staff doivent être respectées.\n\n" +
       "🔥 **Bonne ambiance**\n" +
-      "Reste chill, aide les joueurs et profite du serveur.\n\n" +
+      "Reste chill, aide les autres et profite du serveur.\n\n" +
       "━━━━━━━━━━━━━━━━━━━━━━\n\n" +
-      "✅ **Clique sur la réaction ✅ pour accepter le règlement et débloquer les salons.**"
+      "✅ **Clique sur ✅ pour accepter le règlement et débloquer les salons.**"
     )
     .setColor(0x8b00ff)
-    .setFooter({ text: "Le Terrain des Rois • Règlement officiel" })
+    .setFooter({ text: "Le Terrain des Rois • Vérification officielle" })
     .setTimestamp();
 
   const msg = await channel.send({ embeds: [embed] });
@@ -134,24 +149,73 @@ client.on("messageReactionAdd", async (reaction, user) => {
   if (user.bot) return;
 
   if (reaction.partial) {
-    try {
-      await reaction.fetch();
-    } catch {
-      return;
-    }
+    try { await reaction.fetch(); } catch { return; }
   }
 
   if (reaction.message.channel.id !== REGLEMENT_CHANNEL_ID) return;
   if (reaction.emoji.name !== "✅") return;
 
-  const guild = reaction.message.guild;
-  const member = await guild.members.fetch(user.id).catch(() => null);
+  const member = await reaction.message.guild.members.fetch(user.id).catch(() => null);
   if (!member) return;
 
-  const role = guild.roles.cache.get(MEMBER_ROLE_ID);
-  if (!role) return;
+  await member.roles.add(MEMBER_ROLE_ID).catch(() => {});
+  sendLog("✅ Vérification", `${user.tag} a accepté le règlement.`, 0x00ff00);
+});
 
-  await member.roles.add(role).catch(console.error);
+client.on("messageCreate", async (message) => {
+  if (message.author.bot || !message.guild) return;
+
+  if (isStaff(message.member)) return;
+
+  const inviteRegex = /(discord\.gg|discord\.com\/invite|discordapp\.com\/invite)/i;
+  const linkRegex = /(https?:\/\/|www\.)/i;
+
+  if (inviteRegex.test(message.content)) {
+    await message.delete().catch(() => {});
+    await sendLog("🚫 Invitation bloquée", `${message.author.tag} a envoyé une invitation Discord dans ${message.channel}.`);
+    return;
+  }
+
+  const now = Date.now();
+  const userId = message.author.id;
+
+  if (!spamMap.has(userId)) spamMap.set(userId, []);
+  const timestamps = spamMap.get(userId).filter(t => now - t < 5000);
+  timestamps.push(now);
+  spamMap.set(userId, timestamps);
+
+  if (timestamps.length >= 5) {
+    await message.delete().catch(() => {});
+    await message.member.timeout(5 * 60 * 1000, "Anti-spam automatique").catch(() => {});
+    await sendLog("⚠️ Anti-spam", `${message.author.tag} a été mute 5 minutes pour spam.`);
+  }
+});
+
+client.on("guildMemberAdd", async (member) => {
+  const now = Date.now();
+  joinTimes.push(now);
+
+  while (joinTimes.length && now - joinTimes[0] > 30000) joinTimes.shift();
+
+  await sendLog("👤 Nouveau membre", `${member.user.tag} vient de rejoindre le serveur.`, 0x00ff00);
+
+  if (joinTimes.length >= 8) {
+    await sendLog(
+      "🚨 ALERTE RAID",
+      `Beaucoup de membres viennent de rejoindre rapidement : **${joinTimes.length} en 30 secondes**.\nSurveille le serveur.`,
+      0xff0000
+    );
+  }
+});
+
+client.on("messageDelete", async (message) => {
+  if (!message.guild || message.author?.bot) return;
+
+  await sendLog(
+    "🗑️ Message supprimé",
+    `Auteur : ${message.author?.tag || "Inconnu"}\nSalon : ${message.channel}\nMessage : ${message.content || "Impossible à lire"}`,
+    0xffaa00
+  );
 });
 
 async function checkNBA2KNews(firstStart = false) {
@@ -162,7 +226,6 @@ async function checkNBA2KNews(firstStart = false) {
 
   if (firstStart) {
     feed.items.slice(0, 5).forEach(item => postedNews.add(item.link));
-    console.log("✅ Actus NBA 2K26 chargées sans spam.");
     return;
   }
 
@@ -180,10 +243,9 @@ async function checkNBA2KNews(firstStart = false) {
         "━━━━━━━━━━━━━━━━━━━━━━\n\n" +
         `📢 **${titreFR}**\n` +
         `🌍 *Titre original : ${item.title}*\n\n` +
-        `📝 **Résumé :**\n${resume || "Le flux ne donne pas assez de texte, mais l’actu est bien détectée."}\n\n` +
+        `📝 **Résumé :**\n${resume || "Le flux ne donne pas beaucoup de texte, mais l’actu est bien détectée."}\n\n` +
         `💡 **Explication rapide :**\n${explication}\n\n` +
-        "🎯 **Pourquoi c’est important ?**\n" +
-        "Regarde cette actu pour savoir s’il y a des récompenses, événements, patchs ou nouveautés à récupérer.\n\n" +
+        "🎯 **À surveiller :** récompenses, événements, patchs, VC, XP ou nouveautés.\n\n" +
         "━━━━━━━━━━━━━━━━━━━━━━"
       )
       .setURL(item.link)
