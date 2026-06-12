@@ -1,6 +1,7 @@
 const {
   Client,
   GatewayIntentBits,
+  Partials,
   EmbedBuilder,
   ActionRowBuilder,
   ButtonBuilder,
@@ -12,7 +13,13 @@ const axios = require("axios");
 require("dotenv").config();
 
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages]
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.GuildMessageReactions,
+    GatewayIntentBits.GuildMembers
+  ],
+  partials: [Partials.Message, Partials.Channel, Partials.Reaction]
 });
 
 const parser = new Parser();
@@ -20,6 +27,7 @@ const parser = new Parser();
 const NEWS_CHANNEL_ID = process.env.CHANNEL_ID;
 const REGLEMENT_CHANNEL_ID = process.env.REGLEMENT_CHANNEL_ID;
 const ANNOUNCE_CHANNEL_ID = process.env.ANNOUNCE_CHANNEL_ID;
+const MEMBER_ROLE_ID = process.env.MEMBER_ROLE_ID;
 
 const TWITCH_USERNAME = process.env.TWITCH_USERNAME;
 const TWITCH_CLIENT_ID = process.env.TWITCH_CLIENT_ID;
@@ -40,19 +48,38 @@ function cleanText(text) {
     .slice(0, 900);
 }
 
+function translateTitle(title) {
+  const t = title.toLowerCase();
+
+  if (t.includes("season") && t.includes("courtside report")) {
+    return "Rapport officiel de saison NBA 2K26";
+  }
+  if (t.includes("patch notes")) {
+    return "Notes de mise à jour NBA 2K26";
+  }
+  if (t.includes("festival")) {
+    return "Événement spécial NBA 2K26";
+  }
+  if (t.includes("event")) {
+    return "Nouvel événement NBA 2K26";
+  }
+
+  return title;
+}
+
 function explainNews(title, text) {
   const content = `${title} ${text}`.toLowerCase();
 
   if (content.includes("patch") || content.includes("notes")) {
-    return "C’est une mise à jour du jeu. Elle peut corriger des bugs, modifier le gameplay, ajuster certains modes ou améliorer la stabilité.";
+    return "Cette actu parle d’une mise à jour : corrections de bugs, équilibrage gameplay, stabilité ou changements dans certains modes.";
   }
 
   if (content.includes("season")) {
-    return "C’est une nouvelle saison NBA 2K26. Il peut y avoir de nouvelles récompenses, événements, niveaux, vêtements, animations ou contenus MyCAREER/MyTEAM.";
+    return "Cette actu parle d’une nouvelle saison : récompenses, niveaux, événements, vêtements, animations et nouveautés MyCAREER/MyTEAM.";
   }
 
   if (content.includes("festival") || content.includes("event")) {
-    return "C’est sûrement un événement limité. Il peut donner de l’XP, des VC, des récompenses spéciales ou des défis à faire pendant une durée limitée.";
+    return "Cette actu parle sûrement d’un événement limité : XP, VC, récompenses spéciales ou défis à faire pendant une durée limitée.";
   }
 
   if (content.includes("myteam")) {
@@ -60,10 +87,10 @@ function explainNews(title, text) {
   }
 
   if (content.includes("mycareer") || content.includes("city")) {
-    return "Cette actu concerne sûrement MaCarrière / La Ville : événements, récompenses, quêtes ou nouveautés pour ton joueur.";
+    return "Cette actu concerne MaCarrière / La Ville : quêtes, récompenses, événements ou nouveautés pour ton joueur.";
   }
 
-  return "Nouvelle information NBA 2K26. Regarde le résumé et le lien pour voir les détails complets.";
+  return "Nouvelle information NBA 2K26 détectée automatiquement.";
 }
 
 async function postReglement() {
@@ -71,28 +98,29 @@ async function postReglement() {
   if (!channel) return;
 
   const messages = await channel.messages.fetch({ limit: 30 }).catch(() => null);
-  if (messages && messages.some(m => m.embeds[0]?.title?.includes("LE TERRAIN DES ROIS"))) return;
+  if (messages && messages.some(m => m.embeds[0]?.title?.includes("ACCÈS AU SERVEUR"))) return;
 
   const embed = new EmbedBuilder()
-    .setTitle("👑 LE TERRAIN DES ROIS — RÈGLEMENT")
+    .setTitle("👑 LE TERRAIN DES ROIS — ACCÈS AU SERVEUR")
     .setDescription(
-      "🏀 **Bienvenue dans la communauté NBA 2K26 FR.**\n\n" +
-      "🎮 Ici on parle **NBA 2K26, Fortnite, FiveM, builds, Pro-Am, clips, actus et streams.**\n\n" +
+      "🏀 **Bienvenue sur Le Terrain des Rois**\n" +
+      "La communauté gaming autour de **NBA 2K26, Fortnite et FiveM**.\n\n" +
       "━━━━━━━━━━━━━━━━━━━━━━\n\n" +
+      "📜 **RÈGLEMENT OFFICIEL**\n\n" +
       "✅ **Respect obligatoire**\n" +
-      "Aucune insulte grave, menace, harcèlement ou provocation abusive.\n\n" +
+      "Respecte tous les membres. Pas d’insultes graves, menaces ou harcèlement.\n\n" +
       "🚫 **Spam / Pub interdit**\n" +
       "Pas de flood, liens suspects, pubs sauvages ou arnaques.\n\n" +
       "🏀 **Salons adaptés**\n" +
-      "Utilise les bons salons : build-lab, pro-am, actus, highlights, annonces.\n\n" +
+      "Utilise les bons salons : actus, build-lab, pro-am, highlights, annonces.\n\n" +
       "💸 **Arnaques interdites**\n" +
       "VC fake, faux giveaways, vente de comptes ou scams = sanction.\n\n" +
-      "🛡️ **Staff**\n" +
+      "🛡️ **Respect du staff**\n" +
       "Les décisions du staff doivent être respectées.\n\n" +
-      "🔥 **Ambiance**\n" +
+      "🔥 **Bonne ambiance**\n" +
       "Reste chill, aide les joueurs et profite du serveur.\n\n" +
-      "━━━━━━━━━━━━━━━━━━━━━━\n" +
-      "✅ Réagis avec ✅ si tu acceptes le règlement."
+      "━━━━━━━━━━━━━━━━━━━━━━\n\n" +
+      "✅ **Clique sur la réaction ✅ pour accepter le règlement et débloquer les salons.**"
     )
     .setColor(0x8b00ff)
     .setFooter({ text: "Le Terrain des Rois • Règlement officiel" })
@@ -101,6 +129,30 @@ async function postReglement() {
   const msg = await channel.send({ embeds: [embed] });
   await msg.react("✅").catch(() => {});
 }
+
+client.on("messageReactionAdd", async (reaction, user) => {
+  if (user.bot) return;
+
+  if (reaction.partial) {
+    try {
+      await reaction.fetch();
+    } catch {
+      return;
+    }
+  }
+
+  if (reaction.message.channel.id !== REGLEMENT_CHANNEL_ID) return;
+  if (reaction.emoji.name !== "✅") return;
+
+  const guild = reaction.message.guild;
+  const member = await guild.members.fetch(user.id).catch(() => null);
+  if (!member) return;
+
+  const role = guild.roles.cache.get(MEMBER_ROLE_ID);
+  if (!role) return;
+
+  await member.roles.add(role).catch(console.error);
+});
 
 async function checkNBA2KNews(firstStart = false) {
   const channel = await client.channels.fetch(NEWS_CHANNEL_ID).catch(() => null);
@@ -119,21 +171,25 @@ async function checkNBA2KNews(firstStart = false) {
     postedNews.add(item.link);
 
     const resume = cleanText(item.contentSnippet || item.content || item.summary);
+    const titreFR = translateTitle(item.title);
     const explication = explainNews(item.title, resume);
 
     const embed = new EmbedBuilder()
-      .setTitle("🏀 NBA 2K26 — NOUVELLE ACTU")
+      .setTitle("🏀 NBA 2K26 — NOUVELLE ACTUALITÉ")
       .setDescription(
-        "━━━━━━━━━━━━━━━━━━━━━━\n" +
-        `📢 **${item.title}**\n\n` +
+        "━━━━━━━━━━━━━━━━━━━━━━\n\n" +
+        `📢 **${titreFR}**\n` +
+        `🌍 *Titre original : ${item.title}*\n\n` +
         `📝 **Résumé :**\n${resume || "Le flux ne donne pas assez de texte, mais l’actu est bien détectée."}\n\n` +
-        `💡 **Ce que ça veut dire :**\n${explication}\n\n` +
+        `💡 **Explication rapide :**\n${explication}\n\n` +
+        "🎯 **Pourquoi c’est important ?**\n" +
+        "Regarde cette actu pour savoir s’il y a des récompenses, événements, patchs ou nouveautés à récupérer.\n\n" +
         "━━━━━━━━━━━━━━━━━━━━━━"
       )
       .setURL(item.link)
       .setColor(0xff7a00)
       .setThumbnail("https://cdn.cloudflare.steamstatic.com/steam/apps/3472040/header.jpg")
-      .setFooter({ text: "NBA 2K26 Actus • Mise à jour automatique" })
+      .setFooter({ text: "Le Terrain des Rois • NBA 2K26 Actus" })
       .setTimestamp();
 
     const button = new ActionRowBuilder().addComponents(
