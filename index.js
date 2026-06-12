@@ -220,7 +220,7 @@ client.once("ready", async () => {
   console.log(`✅ Bot connecté : ${client.user.tag}`);
 
   await postReglement();
-  await checkNBA2KNews(true);
+  await checkNBA2KNews(false);
 
   setInterval(() => checkNBA2KNews(false), 10 * 60 * 1000);
   setInterval(checkTwitchLive, 60 * 1000);
