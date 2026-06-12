@@ -30,33 +30,48 @@ let twitchToken = null;
 let wasLive = false;
 
 function cleanText(text) {
-  if (!text) return "Résumé non disponible.";
-  return text.replace(/<[^>]*>/g, "").replace(/&amp;/g, "&").slice(0, 900);
+  if (!text) return "Aucun résumé disponible pour cette actualité.";
+  return text
+    .replace(/<[^>]*>/g, "")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/\s+/g, " ")
+    .slice(0, 900);
 }
 
 async function postReglement() {
   const channel = await client.channels.fetch(REGLEMENT_CHANNEL_ID).catch(() => null);
   if (!channel) return;
 
-  const messages = await channel.messages.fetch({ limit: 20 });
-  if (messages.some(m => m.embeds[0]?.title === "📜 RÈGLEMENT OFFICIEL")) return;
+  const messages = await channel.messages.fetch({ limit: 30 }).catch(() => null);
+  if (messages && messages.some(m => m.embeds[0]?.title?.includes("RÈGLEMENT OFFICIEL"))) return;
 
-  const embed = new EmbedBuilder()
-    .setTitle("📜 RÈGLEMENT OFFICIEL")
-    .setDescription("Bienvenue sur **Le Terrain des Rois** 🏀\n\nLis bien les règles avant de parler.")
-    .addFields(
-      { name: "👑 Respect", value: "Respecte tous les membres. Pas d’insultes graves, menaces ou harcèlement." },
-      { name: "🚫 Spam / Pub", value: "Spam, pub sauvage, liens suspects et flood interdits." },
-      { name: "🏀 NBA 2K26", value: "Parle dans les bons salons : builds, actus, clips, événements, aide." },
-      { name: "💸 Arnaques", value: "Vente de VC fake, comptes, glitchs ou faux giveaways interdits." },
-      { name: "🛡️ Staff", value: "Le staff peut sanctionner si le règlement n’est pas respecté." },
-      { name: "🔥 Ambiance", value: "Reste chill, aide les joueurs et profite du serveur." }
+  const welcome = new EmbedBuilder()
+    .setTitle("👑 BIENVENUE SUR LE TERRAIN DES ROIS")
+    .setDescription(
+      "🏀 **Communauté NBA 2K26 FR**\n" +
+      "🎮 **Fortnite • FiveM • NBA 2K26**\n" +
+      "🔥 Respect • Ambition • Progression\n\n" +
+      "Lis le règlement avant de parler sur le serveur."
     )
     .setColor(0x8b00ff)
-    .setFooter({ text: "Le Terrain des Rois • NBA 2K26" })
+    .setFooter({ text: "Le Terrain des Rois • Communauté Gaming" })
     .setTimestamp();
 
-  await channel.send({ embeds: [embed] });
+  const rules = new EmbedBuilder()
+    .setTitle("📜 RÈGLEMENT OFFICIEL")
+    .addFields(
+      { name: "✅ Respect", value: "Respecte tous les membres. Pas d’insultes graves, menaces ou harcèlement." },
+      { name: "🚫 Pub / Spam", value: "Pub sauvage, flood, spam et liens suspects interdits." },
+      { name: "🏀 Salons", value: "Utilise les bons salons : NBA 2K26, Fortnite, FiveM, clips, actus, aide." },
+      { name: "💸 Arnaques", value: "Interdit de vendre des VC fake, comptes, glitchs ou faux giveaways." },
+      { name: "🛡️ Staff", value: "Les décisions du staff doivent être respectées." },
+      { name: "🔥 Ambiance", value: "Reste chill, aide les joueurs et profite de la communauté." }
+    )
+    .setColor(0xff7a00)
+    .setFooter({ text: "Réagis avec ✅ si tu acceptes le règlement" });
+
+  await channel.send({ embeds: [welcome, rules] });
 }
 
 async function checkNBA2KNews(firstStart = false) {
@@ -74,17 +89,26 @@ async function checkNBA2KNews(firstStart = false) {
     if (postedNews.has(item.link)) continue;
     postedNews.add(item.link);
 
+    const resume = cleanText(item.contentSnippet || item.content || item.summary);
+
     const embed = new EmbedBuilder()
-      .setTitle(`🏀 ${item.title}`)
-      .setDescription(`📰 **Résumé :**\n${cleanText(item.contentSnippet || item.content || item.summary)}`)
+      .setTitle("🏀 NOUVELLE ACTUALITÉ NBA 2K26")
+      .setDescription(
+        "━━━━━━━━━━━━━━━━━━━━━━\n" +
+        `📢 **${item.title}**\n\n` +
+        `📝 **Résumé :**\n${resume}\n\n` +
+        "🎯 **Catégorie :** Actualité / Mise à jour\n" +
+        "━━━━━━━━━━━━━━━━━━━━━━"
+      )
       .setURL(item.link)
       .setColor(0xff7a00)
+      .setThumbnail("https://cdn.cloudflare.steamstatic.com/steam/apps/3472040/header.jpg")
       .setFooter({ text: "NBA 2K26 Actus • Automatique" })
       .setTimestamp();
 
     const button = new ActionRowBuilder().addComponents(
       new ButtonBuilder()
-        .setLabel("Lire l’article")
+        .setLabel("Lire l’article complet")
         .setStyle(ButtonStyle.Link)
         .setURL(item.link)
     );
@@ -102,14 +126,18 @@ async function getTwitchToken() {
 
 async function checkTwitchLive() {
   try {
+    if (!TWITCH_CLIENT_ID || !TWITCH_CLIENT_SECRET || !TWITCH_USERNAME) return;
     if (!twitchToken) await getTwitchToken();
 
-    const res = await axios.get(`https://api.twitch.tv/helix/streams?user_login=${TWITCH_USERNAME}`, {
-      headers: {
-        "Client-ID": TWITCH_CLIENT_ID,
-        "Authorization": `Bearer ${twitchToken}`
+    const res = await axios.get(
+      `https://api.twitch.tv/helix/streams?user_login=${TWITCH_USERNAME}`,
+      {
+        headers: {
+          "Client-ID": TWITCH_CLIENT_ID,
+          Authorization: `Bearer ${twitchToken}`
+        }
       }
-    });
+    );
 
     const live = res.data.data[0];
 
@@ -123,17 +151,17 @@ async function checkTwitchLive() {
         .setTitle("🔴 LIVE TWITCH LANCÉ !")
         .setDescription(
           `**${TWITCH_USERNAME} est en live maintenant !**\n\n` +
-          `🏀 Stream NBA 2K26\n` +
-          `👑 Venez soutenir le live et rejoindre la communauté.\n\n` +
-          `👉 https://www.twitch.tv/${TWITCH_USERNAME}`
+          "🏀 **Stream NBA 2K26 / Gaming**\n" +
+          "👑 Venez soutenir le live et rejoindre la communauté.\n\n" +
+          `📺 **Lien :** https://www.twitch.tv/${TWITCH_USERNAME}`
         )
         .addFields(
-          { name: "🎮 Jeu", value: live.game_name || "NBA 2K26", inline: true },
+          { name: "🎮 Jeu", value: live.game_name || "Gaming", inline: true },
           { name: "👀 Viewers", value: String(live.viewer_count || 0), inline: true }
         )
         .setImage(live.thumbnail_url.replace("{width}", "1280").replace("{height}", "720"))
         .setColor(0x9146ff)
-        .setFooter({ text: "Le Terrain des Rois • Twitch" })
+        .setFooter({ text: "Le Terrain des Rois • Twitch Live" })
         .setTimestamp();
 
       const button = new ActionRowBuilder().addComponents(
