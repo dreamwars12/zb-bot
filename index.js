@@ -1,12 +1,17 @@
-const { Client, GatewayIntentBits, EmbedBuilder } = require("discord.js");
+const {
+  Client,
+  GatewayIntentBits,
+  EmbedBuilder,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle
+} = require("discord.js");
+
 const Parser = require("rss-parser");
 require("dotenv").config();
 
 const client = new Client({
-  intents: [
-    GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMessages
-  ]
+  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages]
 });
 
 const parser = new Parser();
@@ -16,33 +21,35 @@ const REGLEMENT_CHANNEL_ID = process.env.REGLEMENT_CHANNEL_ID;
 
 let postedLinks = new Set();
 
+function cleanText(text) {
+  if (!text) return "Aucun résumé disponible pour cette actualité.";
+  return text
+    .replace(/<[^>]*>/g, "")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .slice(0, 900);
+}
+
 async function postReglement() {
   const channel = await client.channels.fetch(REGLEMENT_CHANNEL_ID);
   if (!channel) return;
 
-  const messages = await channel.messages.fetch({ limit: 20 });
-  const alreadyPosted = messages.some(msg =>
-    msg.embeds[0]?.title === "📜 Règlement du serveur"
-  );
-
-  if (alreadyPosted) return;
-
   const embed = new EmbedBuilder()
-    .setTitle("📜 Règlement du serveur")
+    .setTitle("📜 RÈGLEMENT OFFICIEL")
     .setDescription(
       "Bienvenue sur **Le Terrain des Rois** 🏀\n\n" +
-      "Merci de respecter les règles ci-dessous pour garder un serveur propre et agréable."
+      "Lis bien le règlement avant de parler sur le serveur."
     )
     .addFields(
-      { name: "1️⃣ Respect", value: "Aucune insulte grave, menace, harcèlement ou provocation abusive." },
-      { name: "2️⃣ Spam interdit", value: "Pas de spam, flood, pub sauvage ou messages inutiles." },
-      { name: "3️⃣ Salon adapté", value: "Utilise les bons salons pour parler de NBA 2K26, builds, événements, actus, etc." },
-      { name: "4️⃣ Pas d’arnaque", value: "Interdit de vendre, scam, fake giveaway ou promettre des VC gratuits." },
-      { name: "5️⃣ Respect du staff", value: "Les décisions du staff doivent être respectées." },
-      { name: "6️⃣ Bonne ambiance", value: "Le serveur est fait pour parler NBA 2K26, aider les joueurs et s’amuser." }
+      { name: "👑 Respect", value: "Respecte tous les membres. Aucune insulte grave, menace ou harcèlement." },
+      { name: "🚫 Pub / Spam", value: "Pub, spam, flood et liens suspects interdits." },
+      { name: "🏀 NBA 2K26", value: "Parle dans les bons salons : builds, actus, événements, clips, aide." },
+      { name: "💸 Arnaques interdites", value: "Interdit de vendre des VC fake, comptes, glitchs ou faux giveaways." },
+      { name: "🛡️ Staff", value: "Le staff peut sanctionner si tu ne respectes pas les règles." },
+      { name: "🔥 Ambiance", value: "Reste chill, aide les joueurs et profite du serveur." }
     )
-    .setColor(0x8a2be2)
-    .setFooter({ text: "Le Terrain des Rois • Règlement officiel" })
+    .setColor(0x8b00ff)
+    .setFooter({ text: "Le Terrain des Rois • NBA 2K26" })
     .setTimestamp();
 
   await channel.send({ embeds: [embed] });
@@ -59,20 +66,31 @@ async function checkNBA2KNews() {
       if (postedLinks.has(item.link)) continue;
       postedLinks.add(item.link);
 
+      const resume = cleanText(item.contentSnippet || item.content || item.summary);
+
       const embed = new EmbedBuilder()
-        .setTitle("🏀 Nouvelle actualité NBA 2K26")
-        .setDescription(`**${item.title}**\n\nClique sur le bouton/titre pour voir l'article complet.`)
+        .setTitle(`🏀 ${item.title}`)
         .setURL(item.link)
-        .setColor(0xff7a00)
+        .setDescription(
+          `**Nouvelle actualité NBA 2K26 !**\n\n` +
+          `📰 **Résumé :**\n${resume}`
+        )
         .addFields(
           { name: "🎮 Jeu", value: "NBA 2K26", inline: true },
-          { name: "📰 Type", value: "Actualité / Mise à jour", inline: true }
+          { name: "📢 Catégorie", value: "Actu / Update", inline: true }
         )
-        .setThumbnail("https://cdn.cloudflare.steamstatic.com/steam/apps/3472040/header.jpg")
-        .setFooter({ text: "NBA 2K26 Actualités • Mise à jour automatique" })
+        .setColor(0xff7a00)
+        .setFooter({ text: "NBA 2K26 Actus • Automatique" })
         .setTimestamp();
 
-      await channel.send({ embeds: [embed] });
+      const button = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setLabel("Lire l’article")
+          .setStyle(ButtonStyle.Link)
+          .setURL(item.link)
+      );
+
+      await channel.send({ embeds: [embed], components: [button] });
     }
   } catch (err) {
     console.log("Erreur actu NBA 2K26 :", err.message);
@@ -84,7 +102,9 @@ client.once("ready", async () => {
 
   await postReglement();
 
-  await checkNBA2KNews();
+  const feed = await parser.parseURL("https://store.steampowered.com/feeds/news/app/3472040/");
+  feed.items.slice(0, 5).forEach(item => postedLinks.add(item.link));
+
   setInterval(checkNBA2KNews, 10 * 60 * 1000);
 });
 
