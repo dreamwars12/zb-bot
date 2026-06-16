@@ -1,4 +1,3 @@
-```js
 const {
   Client,
   GatewayIntentBits,
@@ -54,7 +53,7 @@ function isStaff(member) {
     member.roles.cache.has(STAFF_ROLE_ID);
 }
 
-async function sendLog(guild, title, description, color = 0x8b00ff) {
+async function sendLog(guild, title, description, color) {
   if (!LOG_CHANNEL_ID) return;
   const channel = await guild.channels.fetch(LOG_CHANNEL_ID).catch(() => null);
   if (!channel) return;
@@ -62,7 +61,7 @@ async function sendLog(guild, title, description, color = 0x8b00ff) {
   const embed = new EmbedBuilder()
     .setTitle(title)
     .setDescription(description)
-    .setColor(color)
+    .setColor(color || 0x8b00ff)
     .setTimestamp()
     .setFooter({ text: "Le Terrain des Rois • Logs" });
 
@@ -81,21 +80,25 @@ function cleanText(text) {
 }
 
 function translateTitle(title) {
-  const t = title.toLowerCase();
+  const t = String(title || "").toLowerCase();
+
   if (t.includes("patch notes")) return "Notes de mise à jour NBA 2K26";
   if (t.includes("season") && t.includes("courtside report")) return "Rapport officiel de saison NBA 2K26";
   if (t.includes("festival")) return "Événement spécial NBA 2K26";
   if (t.includes("event")) return "Nouvel événement NBA 2K26";
-  return title;
+
+  return title || "Actualité NBA 2K26";
 }
 
 function explainNews(title, text) {
-  const c = `{title} ${text}`.toLowerCase();
+  const c = (String(title || "") + " " + String(text || "")).toLowerCase();
+
   if (c.includes("patch") || c.includes("notes")) return "Mise à jour : corrections, gameplay, bugs ou stabilité.";
   if (c.includes("season")) return "Nouvelle saison : récompenses, niveaux, événements, vêtements ou contenus MyCAREER/MyTEAM.";
   if (c.includes("festival") || c.includes("event")) return "Événement limité : XP, VC, récompenses ou défis.";
   if (c.includes("myteam")) return "Actu MyTEAM : cartes, packs, défis ou récompenses.";
   if (c.includes("mycareer") || c.includes("city")) return "Actu MaCarrière / Ville : quêtes, récompenses ou événements.";
+
   return "Nouvelle information NBA 2K26 détectée automatiquement.";
 }
 
@@ -134,7 +137,11 @@ client.on("messageReactionAdd", async (reaction, user) => {
   if (user.bot) return;
 
   if (reaction.partial) {
-    try { await reaction.fetch(); } catch { return; }
+    try {
+      await reaction.fetch();
+    } catch {
+      return;
+    }
   }
 
   if (reaction.message.channel.id !== REGLEMENT_CHANNEL_ID) return;
@@ -179,133 +186,113 @@ async function sendTicketPanel(channel) {
     .setCustomId("ticket_select")
     .setPlaceholder("🎫 Choisis le type de ticket")
     .addOptions(
-      {
-        label: "Support",
-        description: "Problème général ou question",
-        value: "support",
-        emoji: "🛠️"
-      },
-      {
-        label: "Signalement",
-        description: "Signaler un joueur ou comportement",
-        value: "signalement",
-        emoji: "🚨"
-      },
-      {
-        label: "Pro-Am",
-        description: "Recrutement équipe Pro-Am",
-        value: "proam",
-        emoji: "🏀"
-      },
-      {
-        label: "Partenariat",
-        description: "Demande de partenariat",
-        value: "partenaire",
-        emoji: "🤝"
-      }
+      { label: "Support", description: "Problème général ou question", value: "support", emoji: "🛠️" },
+      { label: "Signalement", description: "Signaler un joueur ou comportement", value: "signalement", emoji: "🚨" },
+      { label: "Pro-Am", description: "Recrutement équipe Pro-Am", value: "proam", emoji: "🏀" },
+      { label: "Partenariat", description: "Demande de partenariat", value: "partenaire", emoji: "🤝" }
     );
 
   const row = new ActionRowBuilder().addComponents(menu);
 
   await channel.send({
-    embeds,
+    embeds: embeds,
     components: [row]
   });
 }
 
 async function createTicket(interaction, type) {
-  const guild = interaction.guild;
+  try {
+    await interaction.deferReply({ ephemeral: true });
 
-  const category = await guild.channels.fetch(TICKET_CATEGORY_ID).catch(() => null);
-  if (!category) {
-    return interaction.reply({
-      content: "❌ Catégorie ticket introuvable. Vérifie TICKET_CATEGORY_ID.",
-      ephemeral: true
+    const guild = interaction.guild;
+
+    const category = await guild.channels.fetch(TICKET_CATEGORY_ID).catch(() => null);
+    if (!category) {
+      return interaction.editReply("❌ Catégorie ticket introuvable. Vérifie TICKET_CATEGORY_ID.");
+    }
+
+    const username = interaction.user.username.toLowerCase().replace(/[^a-z0-9-]/g, "");
+    const ticketName = "ticket-" + type + "-" + username;
+
+    const existing = guild.channels.cache.find(c => c.name === ticketName);
+    if (existing) {
+      return interaction.editReply("❌ Tu as déjà un ticket : " + existing.toString());
+    }
+
+    const ticketChannel = await guild.channels.create({
+      name: ticketName,
+      type: ChannelType.GuildText,
+      parent: category.id,
+      permissionOverwrites: [
+        { id: guild.id, deny: [PermissionsBitField.Flags.ViewChannel] },
+        {
+          id: interaction.user.id,
+          allow: [
+            PermissionsBitField.Flags.ViewChannel,
+            PermissionsBitField.Flags.SendMessages,
+            PermissionsBitField.Flags.ReadMessageHistory,
+            PermissionsBitField.Flags.AttachFiles
+          ]
+        },
+        {
+          id: STAFF_ROLE_ID,
+          allow: [
+            PermissionsBitField.Flags.ViewChannel,
+            PermissionsBitField.Flags.SendMessages,
+            PermissionsBitField.Flags.ReadMessageHistory,
+            PermissionsBitField.Flags.ManageMessages
+          ]
+        }
+      ]
     });
-  }
 
-  const username = interaction.user.username.toLowerCase().replace(/[^a-z0-9-]/g, "");
-  const ticketName = `ticket-${type}-${username}`;
+    const questions = {
+      support: "Explique ton problème avec le plus de détails possible.",
+      signalement: "Envoie le pseudo du joueur, une preuve et explique la situation.",
+      proam: "Présente ton poste, ton build, ton niveau et tes disponibilités.",
+      partenaire: "Présente ton serveur/chaîne, tes stats et ce que tu proposes."
+    };
 
-  const existing = guild.channels.cache.find(c => c.name === ticketName);
-  if (existing) {
-    return interaction.reply({
-      content: `❌ Tu as déjà un ticket : ${existing}`,
-      ephemeral: true
+    const embed = new EmbedBuilder()
+      .setTitle("🎫 Ticket " + type.toUpperCase())
+      .setDescription(
+        "Salut " + interaction.user.toString() + " 👋\n\n" +
+        (questions[type] || "Explique ta demande clairement.") + "\n\n" +
+        "━━━━━━━━━━━━━━━━━━━━━━\n" +
+        "📌 **Règles :**\n" +
+        "• Pas de spam\n" +
+        "• Pas d’insultes\n" +
+        "• Explique clairement\n" +
+        "• Attends le staff\n" +
+        "━━━━━━━━━━━━━━━━━━━━━━"
+      )
+      .setColor(0x8b00ff)
+      .setFooter({ text: "Le Terrain des Rois • Support" })
+      .setTimestamp();
+
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId("close_ticket")
+        .setLabel("Fermer")
+        .setEmoji("🔒")
+        .setStyle(ButtonStyle.Danger)
+    );
+
+    await ticketChannel.send({
+      content: "<@&" + STAFF_ROLE_ID + "> " + interaction.user.toString(),
+      embeds: [embed],
+      components: [row]
     });
+
+    await sendLog(guild, "🎫 Ticket créé", interaction.user.tag + " a ouvert " + ticketChannel.toString() + ".", 0x00ff00);
+
+    return interaction.editReply("✅ Ticket créé : " + ticketChannel.toString());
+  } catch (err) {
+    console.log("Erreur createTicket :", err.message);
+    if (interaction.deferred || interaction.replied) {
+      return interaction.editReply("❌ Erreur ticket : " + err.message).catch(() => {});
+    }
   }
-
-  const ticketChannel = await guild.channels.create({
-    name: ticketName,
-    type: ChannelType.GuildText,
-    parent: category.id,
-    permissionOverwrites: [
-      { id: guild.id, deny: [PermissionsBitField.Flags.ViewChannel] },
-      {
-        id: interaction.user.id,
-        allow: [
-          PermissionsBitField.Flags.ViewChannel,
-          PermissionsBitField.Flags.SendMessages,
-          PermissionsBitField.Flags.ReadMessageHistory,
-          PermissionsBitField.Flags.AttachFiles
-        ]
-      },
-      {
-        id: STAFF_ROLE_ID,
-        allow: [
-          PermissionsBitField.Flags.ViewChannel,
-          PermissionsBitField.Flags.SendMessages,
-          PermissionsBitField.Flags.ReadMessageHistory,
-          PermissionsBitField.Flags.ManageMessages
-        ]
-      }
-    ]
-  });
-
-  const questions = {
-    support: "Explique ton problème avec le plus de détails possible.",
-    signalement: "Envoie le pseudo du joueur, une preuve et explique la situation.",
-    proam: "Présente ton poste, ton build, ton niveau et tes disponibilités.",
-    partenaire: "Présente ton serveur/chaîne, tes stats et ce que tu proposes."
-  };
-
-  const embed = new EmbedBuilder()
-    .setTitle(`🎫 Ticket ${type.toUpperCase()}`)
-    .setDescription(
-      `Salut ${interaction.user} 👋\n\n` +
-      `${questions[type] || "Explique ta demande clairement."}\n\n` +
-      "━━━━━━━━━━━━━━━━━━━━━━\n" +
-      "📌 **Règles :**\n" +
-      "• Pas de spam\n" +
-      "• Pas d’insultes\n" +
-      "• Explique clairement\n" +
-      "• Attends le staff\n" +
-      "━━━━━━━━━━━━━━━━━━━━━━"
-    )
-    .setColor(0x8b00ff)
-    .setFooter({ text: "Le Terrain des Rois • Support" })
-    .setTimestamp();
-
-  const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId("close_ticket")
-      .setLabel("Fermer")
-      .setEmoji("🔒")
-      .setStyle(ButtonStyle.Danger)
-  );
-
-  await ticketChannel.send({
-    content: `<@&${STAFF_ROLE_ID}> ${interaction.user}`,
-    embeds: [embed],
-    components: [row]
-  });
-
-  await sendLog(guild, "🎫 Ticket créé", `${interaction.user.tag} a ouvert ${ticketChannel}.`, 0x00ff00);
-
-  return interaction.reply({
-    content: `✅ Ticket créé : ${ticketChannel}`,
-    ephemeral: true
-  });
 }
 
 client.on("messageCreate", async (message) => {
@@ -328,13 +315,13 @@ client.on("messageCreate", async (message) => {
   if (/(discord\.gg|discord\.com\/invite|discordapp\.com\/invite)/i.test(message.content)) {
     await message.delete().catch(() => {});
     await message.member.timeout(15 * 60 * 1000, "Pub Discord interdite").catch(() => {});
-    return sendLog(message.guild, "🚫 Pub Discord bloquée", `${message.author.tag} a envoyé une invitation dans ${message.channel}.`, 0xff0000);
+    return sendLog(message.guild, "🚫 Pub Discord bloquée", message.author.tag + " a envoyé une invitation dans " + message.channel.toString() + ".", 0xff0000);
   }
 
   if (message.mentions.everyone || message.mentions.users.size >= 5 || message.mentions.roles.size >= 3) {
     await message.delete().catch(() => {});
     await message.member.timeout(20 * 60 * 1000, "Mass mention").catch(() => {});
-    return sendLog(message.guild, "🚨 Anti-mass mention", `${message.author.tag} a fait trop de mentions.`, 0xff0000);
+    return sendLog(message.guild, "🚨 Anti-mass mention", message.author.tag + " a fait trop de mentions.", 0xff0000);
   }
 
   const now = Date.now();
@@ -347,7 +334,7 @@ client.on("messageCreate", async (message) => {
   if (list.length >= 5) {
     await message.delete().catch(() => {});
     await message.member.timeout(10 * 60 * 1000, "Spam rapide").catch(() => {});
-    return sendLog(message.guild, "⚠️ Anti-spam", `${message.author.tag} a spam.`, 0xffaa00);
+    return sendLog(message.guild, "⚠️ Anti-spam", message.author.tag + " a spam.", 0xffaa00);
   }
 });
 
@@ -355,15 +342,15 @@ client.on("guildMemberAdd", async (member) => {
   const age = Date.now() - member.user.createdTimestamp;
   const sevenDays = 7 * 24 * 60 * 60 * 1000;
 
-  await sendLog(member.guild, "👤 Nouveau membre", `${member.user.tag} a rejoint le serveur.`, 0x00ff00);
+  await sendLog(member.guild, "👤 Nouveau membre", member.user.tag + " a rejoint le serveur.", 0x00ff00);
 
   if (age < sevenDays) {
-    await sendLog(member.guild, "🔒 Anti-alt", `${member.user.tag} a un compte de moins de 7 jours.`, 0xff0000);
+    await sendLog(member.guild, "🔒 Anti-alt", member.user.tag + " a un compte de moins de 7 jours.", 0xff0000);
   }
 });
 
 client.on("guildMemberRemove", async (member) => {
-  await sendLog(member.guild, "📤 Départ", `${member.user.tag} a quitté le serveur.`, 0xffaa00);
+  await sendLog(member.guild, "📤 Départ", member.user.tag + " a quitté le serveur.", 0xffaa00);
 });
 
 async function postRolesPanel(channel) {
@@ -398,7 +385,7 @@ client.on("interactionCreate", async (interaction) => {
     }
 
     await interaction.reply("🔒 Ticket fermé dans 5 secondes.");
-    await sendLog(interaction.guild, "🔒 Ticket fermé", `${interaction.user.tag} a fermé ${interaction.channel}.`, 0xffaa00);
+    await sendLog(interaction.guild, "🔒 Ticket fermé", interaction.user.tag + " a fermé " + interaction.channel.toString() + ".", 0xffaa00);
 
     setTimeout(() => {
       interaction.channel.delete().catch(() => {});
@@ -428,11 +415,11 @@ client.on("interactionCreate", async (interaction) => {
 
   if (interaction.member.roles.cache.has(role.id)) {
     await interaction.member.roles.remove(role);
-    return interaction.reply({ content: `Rôle retiré : ${role.name}`, ephemeral: true });
+    return interaction.reply({ content: "Rôle retiré : " + role.name, ephemeral: true });
   }
 
   await interaction.member.roles.add(role);
-  return interaction.reply({ content: `Rôle ajouté : ${role.name}`, ephemeral: true });
+  return interaction.reply({ content: "Rôle ajouté : " + role.name, ephemeral: true });
 });
 
 async function checkNBA2KNews(firstStart = false) {
@@ -457,10 +444,10 @@ async function checkNBA2KNews(firstStart = false) {
     const embed = new EmbedBuilder()
       .setTitle("🏀 NBA 2K26 — NOUVELLE ACTUALITÉ")
       .setDescription(
-        `📢 **${titreFR}**\n` +
-        `🌍 *Titre original : ${item.title}*\n\n` +
-        `📝 **Résumé :**\n${resume || "Le flux ne donne pas beaucoup de texte."}\n\n` +
-        `💡 **Explication rapide :**\n${explication}\n\n` +
+        "📢 **" + titreFR + "**\n" +
+        "🌍 *Titre original : " + item.title + "*\n\n" +
+        "📝 **Résumé :**\n" + (resume || "Le flux ne donne pas beaucoup de texte.") + "\n\n" +
+        "💡 **Explication rapide :**\n" + explication + "\n\n" +
         "🎯 **À surveiller :** récompenses, événements, patchs, VC, XP ou nouveautés."
       )
       .setURL(item.link)
@@ -478,7 +465,9 @@ async function checkNBA2KNews(firstStart = false) {
 
 async function getTwitchToken() {
   const res = await axios.post(
-    `https://id.twitch.tv/oauth2/token?client_id=${TWITCH_CLIENT_ID}&client_secret=${TWITCH_CLIENT_SECRET}&grant_type=client_credentials`
+    "https://id.twitch.tv/oauth2/token?client_id=" + TWITCH_CLIENT_ID +
+    "&client_secret=" + TWITCH_CLIENT_SECRET +
+    "&grant_type=client_credentials"
   );
 
   twitchToken = res.data.access_token;
@@ -490,11 +479,11 @@ async function checkTwitchLive() {
     if (!twitchToken) await getTwitchToken();
 
     const res = await axios.get(
-      `https://api.twitch.tv/helix/streams?user_login=${TWITCH_USERNAME}`,
+      "https://api.twitch.tv/helix/streams?user_login=" + TWITCH_USERNAME,
       {
         headers: {
           "Client-ID": TWITCH_CLIENT_ID,
-          Authorization: `Bearer ${twitchToken}`
+          Authorization: "Bearer " + twitchToken
         }
       }
     );
@@ -510,10 +499,10 @@ async function checkTwitchLive() {
       const embed = new EmbedBuilder()
         .setTitle("🔴 LIVE TWITCH LANCÉ !")
         .setDescription(
-          `**${TWITCH_USERNAME} est en live maintenant !**\n\n` +
-          `🎮 **Jeu :** ${live.game_name || "Gaming"}\n` +
-          `📌 **Titre :** ${live.title || "Live en cours"}\n\n` +
-          `📺 https://www.twitch.tv/${TWITCH_USERNAME}`
+          "**" + TWITCH_USERNAME + " est en live maintenant !**\n\n" +
+          "🎮 **Jeu :** " + (live.game_name || "Gaming") + "\n" +
+          "📌 **Titre :** " + (live.title || "Live en cours") + "\n\n" +
+          "📺 https://www.twitch.tv/" + TWITCH_USERNAME
         )
         .addFields(
           { name: "👀 Viewers", value: String(live.viewer_count || 0), inline: true },
@@ -525,7 +514,7 @@ async function checkTwitchLive() {
         .setTimestamp();
 
       const button = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setLabel("Rejoindre le live").setStyle(ButtonStyle.Link).setURL(`https://www.twitch.tv/${TWITCH_USERNAME}`)
+        new ButtonBuilder().setLabel("Rejoindre le live").setStyle(ButtonStyle.Link).setURL("https://www.twitch.tv/" + TWITCH_USERNAME)
       );
 
       await channel.send({
@@ -543,7 +532,7 @@ async function checkTwitchLive() {
 }
 
 client.once("ready", async () => {
-  console.log(`✅ Bot complet connecté : ${client.user.tag}`);
+  console.log("✅ Bot complet connecté : " + client.user.tag);
 
   await postReglement();
   await checkNBA2KNews(false);
@@ -553,4 +542,3 @@ client.once("ready", async () => {
 });
 
 client.login(process.env.TOKEN);
-```
