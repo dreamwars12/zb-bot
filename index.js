@@ -1,3 +1,4 @@
+```js
 const {
   Client,
   GatewayIntentBits,
@@ -7,7 +8,8 @@ const {
   ButtonBuilder,
   ButtonStyle,
   ChannelType,
-  PermissionsBitField
+  PermissionsBitField,
+  StringSelectMenuBuilder
 } = require("discord.js");
 
 const Parser = require("rss-parser");
@@ -35,6 +37,7 @@ const MEMBER_ROLE_ID = process.env.MEMBER_ROLE_ID;
 const STAFF_ROLE_ID = process.env.STAFF_ROLE_ID;
 const TICKET_CATEGORY_ID = process.env.TICKET_CATEGORY_ID;
 const LOG_CHANNEL_ID = process.env.LOG_CHANNEL_ID;
+const TICKET_BANNER_URL = process.env.TICKET_BANNER_URL;
 
 const TWITCH_USERNAME = process.env.TWITCH_USERNAME;
 const TWITCH_CLIENT_ID = process.env.TWITCH_CLIENT_ID;
@@ -53,7 +56,6 @@ function isStaff(member) {
 
 async function sendLog(guild, title, description, color = 0x8b00ff) {
   if (!LOG_CHANNEL_ID) return;
-
   const channel = await guild.channels.fetch(LOG_CHANNEL_ID).catch(() => null);
   if (!channel) return;
 
@@ -80,33 +82,20 @@ function cleanText(text) {
 
 function translateTitle(title) {
   const t = title.toLowerCase();
-
   if (t.includes("patch notes")) return "Notes de mise à jour NBA 2K26";
   if (t.includes("season") && t.includes("courtside report")) return "Rapport officiel de saison NBA 2K26";
   if (t.includes("festival")) return "Événement spécial NBA 2K26";
   if (t.includes("event")) return "Nouvel événement NBA 2K26";
-
   return title;
 }
 
 function explainNews(title, text) {
   const c = `${title} ${text}`.toLowerCase();
-
-  if (c.includes("patch") || c.includes("notes")) {
-    return "Mise à jour : corrections, gameplay, bugs ou stabilité.";
-  }
-
-  if (c.includes("season")) {
-    return "Nouvelle saison : récompenses, niveaux, événements, vêtements ou contenus MyCAREER/MyTEAM.";
-  }
-
-  if (c.includes("festival") || c.includes("event")) {
-    return "Événement limité : XP, VC, récompenses ou défis.";
-  }
-
+  if (c.includes("patch") || c.includes("notes")) return "Mise à jour : corrections, gameplay, bugs ou stabilité.";
+  if (c.includes("season")) return "Nouvelle saison : récompenses, niveaux, événements, vêtements ou contenus MyCAREER/MyTEAM.";
+  if (c.includes("festival") || c.includes("event")) return "Événement limité : XP, VC, récompenses ou défis.";
   if (c.includes("myteam")) return "Actu MyTEAM : cartes, packs, défis ou récompenses.";
   if (c.includes("mycareer") || c.includes("city")) return "Actu MaCarrière / Ville : quêtes, récompenses ou événements.";
-
   return "Nouvelle information NBA 2K26 détectée automatiquement.";
 }
 
@@ -145,11 +134,7 @@ client.on("messageReactionAdd", async (reaction, user) => {
   if (user.bot) return;
 
   if (reaction.partial) {
-    try {
-      await reaction.fetch();
-    } catch {
-      return;
-    }
+    try { await reaction.fetch(); } catch { return; }
   }
 
   if (reaction.message.channel.id !== REGLEMENT_CHANNEL_ID) return;
@@ -162,27 +147,70 @@ client.on("messageReactionAdd", async (reaction, user) => {
 });
 
 async function sendTicketPanel(channel) {
+  const embeds = [];
+
+  if (TICKET_BANNER_URL) {
+    embeds.push(
+      new EmbedBuilder()
+        .setImage(TICKET_BANNER_URL)
+        .setColor(0x8b00ff)
+    );
+  }
+
   const embed = new EmbedBuilder()
     .setTitle("🎫 CENTRE D’AIDE — LE TERRAIN DES ROIS")
     .setDescription(
-      "Choisis une catégorie pour ouvrir un ticket.\n\n" +
+      "Bienvenue dans le **support officiel**.\n\n" +
+      "Sélectionne une catégorie dans le menu ci-dessous pour ouvrir un ticket.\n\n" +
+      "━━━━━━━━━━━━━━━━━━━━━━\n" +
       "🛠️ **Support** — problème général\n" +
       "🚨 **Signalement** — tricheur / comportement toxique\n" +
       "🏀 **Pro-Am** — recrutement équipe\n" +
-      "🤝 **Partenariat** — collaboration"
+      "🤝 **Partenariat** — collaboration\n" +
+      "━━━━━━━━━━━━━━━━━━━━━━"
     )
     .setColor(0x8b00ff)
     .setFooter({ text: "Le Terrain des Rois • Tickets" })
     .setTimestamp();
 
-  const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId("ticket_support").setLabel("Support").setEmoji("🛠️").setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId("ticket_signalement").setLabel("Signalement").setEmoji("🚨").setStyle(ButtonStyle.Danger),
-    new ButtonBuilder().setCustomId("ticket_proam").setLabel("Pro-Am").setEmoji("🏀").setStyle(ButtonStyle.Success),
-    new ButtonBuilder().setCustomId("ticket_partenaire").setLabel("Partenariat").setEmoji("🤝").setStyle(ButtonStyle.Secondary)
-  );
+  embeds.push(embed);
 
-  await channel.send({ embeds: [embed], components: [row] });
+  const menu = new StringSelectMenuBuilder()
+    .setCustomId("ticket_select")
+    .setPlaceholder("🎫 Choisis le type de ticket")
+    .addOptions(
+      {
+        label: "Support",
+        description: "Problème général ou question",
+        value: "support",
+        emoji: "🛠️"
+      },
+      {
+        label: "Signalement",
+        description: "Signaler un joueur ou comportement",
+        value: "signalement",
+        emoji: "🚨"
+      },
+      {
+        label: "Pro-Am",
+        description: "Recrutement équipe Pro-Am",
+        value: "proam",
+        emoji: "🏀"
+      },
+      {
+        label: "Partenariat",
+        description: "Demande de partenariat",
+        value: "partenaire",
+        emoji: "🤝"
+      }
+    );
+
+  const row = new ActionRowBuilder().addComponents(menu);
+
+  await channel.send({
+    embeds,
+    components: [row]
+  });
 }
 
 async function createTicket(interaction, type) {
@@ -259,7 +287,11 @@ async function createTicket(interaction, type) {
     .setTimestamp();
 
   const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId("close_ticket").setLabel("Fermer").setEmoji("🔒").setStyle(ButtonStyle.Danger)
+    new ButtonBuilder()
+      .setCustomId("close_ticket")
+      .setLabel("Fermer")
+      .setEmoji("🔒")
+      .setStyle(ButtonStyle.Danger)
   );
 
   await ticketChannel.send({
@@ -351,12 +383,14 @@ async function postRolesPanel(channel) {
 }
 
 client.on("interactionCreate", async (interaction) => {
-  if (!interaction.isButton()) return;
-
-  if (interaction.customId.startsWith("ticket_")) {
-    const type = interaction.customId.replace("ticket_", "");
-    return createTicket(interaction, type);
+  if (interaction.isStringSelectMenu()) {
+    if (interaction.customId === "ticket_select") {
+      const type = interaction.values[0];
+      return createTicket(interaction, type);
+    }
   }
+
+  if (!interaction.isButton()) return;
 
   if (interaction.customId === "close_ticket") {
     if (!isStaff(interaction.member)) {
@@ -519,3 +553,4 @@ client.once("ready", async () => {
 });
 
 client.login(process.env.TOKEN);
+```
