@@ -90,7 +90,7 @@ function translateTitle(title) {
 }
 
 function explainNews(title, text) {
-  const c = `${title} ${text}`.toLowerCase();
+  const c = `{title} ${text}`.toLowerCase();
   if (c.includes("patch") || c.includes("notes")) return "Mise à jour : corrections, gameplay, bugs ou stabilité.";
   if (c.includes("season")) return "Nouvelle saison : récompenses, niveaux, événements, vêtements ou contenus MyCAREER/MyTEAM.";
   if (c.includes("festival") || c.includes("event")) return "Événement limité : XP, VC, récompenses ou défis.";
