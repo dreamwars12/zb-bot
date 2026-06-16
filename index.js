@@ -1,3 +1,4 @@
+```js
 const {
   Client,
   GatewayIntentBits,
@@ -5,7 +6,9 @@ const {
   EmbedBuilder,
   ActionRowBuilder,
   ButtonBuilder,
-  ButtonStyle
+  ButtonStyle,
+  ChannelType,
+  PermissionsBitField
 } = require("discord.js");
 
 const Parser = require("rss-parser");
@@ -17,7 +20,8 @@ const client = new Client({
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.GuildMembers,
-    GatewayIntentBits.GuildMessageReactions
+    GatewayIntentBits.GuildMessageReactions,
+    GatewayIntentBits.MessageContent
   ],
   partials: [Partials.Message, Partials.Channel, Partials.Reaction]
 });
@@ -29,6 +33,10 @@ const REGLEMENT_CHANNEL_ID = process.env.REGLEMENT_CHANNEL_ID;
 const ANNOUNCE_CHANNEL_ID = process.env.ANNOUNCE_CHANNEL_ID;
 const MEMBER_ROLE_ID = process.env.MEMBER_ROLE_ID;
 
+const STAFF_ROLE_ID = process.env.STAFF_ROLE_ID;
+const TICKET_CATEGORY_ID = process.env.TICKET_CATEGORY_ID;
+const LOG_CHANNEL_ID = process.env.LOG_CHANNEL_ID;
+
 const TWITCH_USERNAME = process.env.TWITCH_USERNAME;
 const TWITCH_CLIENT_ID = process.env.TWITCH_CLIENT_ID;
 const TWITCH_CLIENT_SECRET = process.env.TWITCH_CLIENT_SECRET;
@@ -36,6 +44,28 @@ const TWITCH_CLIENT_SECRET = process.env.TWITCH_CLIENT_SECRET;
 let postedNews = new Set();
 let twitchToken = null;
 let wasLive = false;
+let spamMap = new Map();
+let joinTimes = [];
+
+function isStaff(member) {
+  if (!member) return false;
+  return member.permissions.has(PermissionsBitField.Flags.Administrator) ||
+    member.roles.cache.has(STAFF_ROLE_ID);
+}
+
+async function sendLog(guild, title, description, color = 0x8b00ff) {
+  const channel = await guild.channels.fetch(LOG_CHANNEL_ID).catch(() => null);
+  if (!channel) return;
+
+  const embed = new EmbedBuilder()
+    .setTitle(title)
+    .setDescription(description)
+    .setColor(color)
+    .setTimestamp()
+    .setFooter({ text: "Le Terrain des Rois • Sécurité" });
+
+  channel.send({ embeds: [embed] }).catch(() => {});
+}
 
 function cleanText(text) {
   if (!text) return "";
@@ -50,31 +80,20 @@ function cleanText(text) {
 
 function translateTitle(title) {
   const t = title.toLowerCase();
-
   if (t.includes("patch notes")) return "Notes de mise à jour NBA 2K26";
   if (t.includes("season") && t.includes("courtside report")) return "Rapport officiel de saison NBA 2K26";
   if (t.includes("festival")) return "Événement spécial NBA 2K26";
   if (t.includes("event")) return "Nouvel événement NBA 2K26";
-
   return title;
 }
 
 function explainNews(title, text) {
   const c = `${title} ${text}`.toLowerCase();
 
-  if (c.includes("patch") || c.includes("notes")) {
-    return "Mise à jour : corrections, gameplay, bugs, stabilité ou changements dans certains modes.";
-  }
-
-  if (c.includes("season")) {
-    return "Nouvelle saison : récompenses, niveaux, événements, vêtements, animations ou contenus MyCAREER/MyTEAM.";
-  }
-
-  if (c.includes("festival") || c.includes("event")) {
-    return "Événement limité : XP, VC, récompenses spéciales ou défis pendant une durée limitée.";
-  }
-
-  if (c.includes("myteam")) return "Actu MyTEAM : cartes, packs, défis, récompenses ou événements.";
+  if (c.includes("patch") || c.includes("notes")) return "Mise à jour : corrections, gameplay, bugs ou stabilité.";
+  if (c.includes("season")) return "Nouvelle saison : récompenses, niveaux, événements, vêtements ou contenus MyCAREER/MyTEAM.";
+  if (c.includes("festival") || c.includes("event")) return "Événement limité : XP, VC, récompenses ou défis.";
+  if (c.includes("myteam")) return "Actu MyTEAM : cartes, packs, défis ou récompenses.";
   if (c.includes("mycareer") || c.includes("city")) return "Actu MaCarrière / Ville : quêtes, récompenses ou événements.";
 
   return "Nouvelle information NBA 2K26 détectée automatiquement.";
@@ -127,12 +146,186 @@ client.on("messageReactionAdd", async (reaction, user) => {
   await member.roles.add(MEMBER_ROLE_ID).catch(() => {});
 });
 
+async function sendTicketPanel(channel) {
+  const embed = new EmbedBuilder()
+    .setTitle("🎫 CENTRE D’AIDE — LE TERRAIN DES ROIS")
+    .setDescription(
+      "Choisis une catégorie pour ouvrir un ticket.\n\n" +
+      "🛠️ **Support** — problème général\n" +
+      "🚨 **Signalement** — tricheur / comportement toxique\n" +
+      "🏀 **Pro-Am** — recrutement équipe\n" +
+      "🤝 **Partenariat** — collaboration"
+    )
+    .setColor(0x8b00ff)
+    .setFooter({ text: "Le Terrain des Rois • Tickets" })
+    .setTimestamp();
+
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId("ticket_support").setLabel("Support").setEmoji("🛠️").setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId("ticket_signalement").setLabel("Signalement").setEmoji("🚨").setStyle(ButtonStyle.Danger),
+    new ButtonBuilder().setCustomId("ticket_proam").setLabel("Pro-Am").setEmoji("🏀").setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId("ticket_partenaire").setLabel("Partenariat").setEmoji("🤝").setStyle(ButtonStyle.Secondary)
+  );
+
+  await channel.send({ embeds: [embed], components: [row] });
+}
+
+async function createTicket(interaction, type) {
+  const guild = interaction.guild;
+
+  const category = await guild.channels.fetch(TICKET_CATEGORY_ID).catch(() => null);
+  if (!category) {
+    return interaction.reply({
+      content: "❌ Catégorie ticket introuvable. Vérifie `TICKET_CATEGORY_ID`.",
+      ephemeral: true
+    });
+  }
+
+  const username = interaction.user.username.toLowerCase().replace(/[^a-z0-9-]/g, "");
+  const ticketName = `ticket-${type}-${username}`;
+
+  const existing = guild.channels.cache.find(c => c.name === ticketName);
+  if (existing) {
+    return interaction.reply({
+      content: `❌ Tu as déjà un ticket : ${existing}`,
+      ephemeral: true
+    });
+  }
+
+  const ticketChannel = await guild.channels.create({
+    name: ticketName,
+    type: ChannelType.GuildText,
+    parent: category.id,
+    permissionOverwrites: [
+      { id: guild.id, deny: [PermissionsBitField.Flags.ViewChannel] },
+      {
+        id: interaction.user.id,
+        allow: [
+          PermissionsBitField.Flags.ViewChannel,
+          PermissionsBitField.Flags.SendMessages,
+          PermissionsBitField.Flags.ReadMessageHistory,
+          PermissionsBitField.Flags.AttachFiles
+        ]
+      },
+      {
+        id: STAFF_ROLE_ID,
+        allow: [
+          PermissionsBitField.Flags.ViewChannel,
+          PermissionsBitField.Flags.SendMessages,
+          PermissionsBitField.Flags.ReadMessageHistory,
+          PermissionsBitField.Flags.ManageMessages
+        ]
+      }
+    ]
+  });
+
+  const questions = {
+    support: "Explique ton problème avec le plus de détails possible.",
+    signalement: "Envoie le pseudo du joueur, une preuve et explique la situation.",
+    proam: "Présente ton poste, ton build, ton niveau et tes disponibilités.",
+    partenaire: "Présente ton serveur/chaîne, tes stats et ce que tu proposes."
+  };
+
+  const embed = new EmbedBuilder()
+    .setTitle(`🎫 Ticket ${type.toUpperCase()}`)
+    .setDescription(
+      `Salut ${interaction.user} 👋\n\n` +
+      `${questions[type] || "Explique ta demande clairement."}\n\n` +
+      "━━━━━━━━━━━━━━━━━━━━━━\n" +
+      "📌 **Règles :**\n" +
+      "• Pas de spam\n" +
+      "• Pas d’insultes\n" +
+      "• Explique clairement\n" +
+      "• Attends le staff\n" +
+      "━━━━━━━━━━━━━━━━━━━━━━"
+    )
+    .setColor(0x8b00ff)
+    .setFooter({ text: "Le Terrain des Rois • Support" })
+    .setTimestamp();
+
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId("close_ticket").setLabel("Fermer").setEmoji("🔒").setStyle(ButtonStyle.Danger)
+  );
+
+  await ticketChannel.send({
+    content: `<@&${STAFF_ROLE_ID}> ${interaction.user}`,
+    embeds: [embed],
+    components: [row]
+  });
+
+  await sendLog(guild, "🎫 Ticket créé", `${interaction.user.tag} a ouvert ${ticketChannel}.`, 0x00ff00);
+
+  return interaction.reply({
+    content: `✅ Ticket créé : ${ticketChannel}`,
+    ephemeral: true
+  });
+}
+
 client.on("messageCreate", async (message) => {
   if (message.author.bot || !message.guild) return;
 
-  if (message.content === "!rolespanel") {
+  if (message.content.toLowerCase() === "!rolespanel") {
     return postRolesPanel(message.channel);
   }
+
+  if (message.content.toLowerCase() === "!ticketpanel") {
+    if (!isStaff(message.member)) {
+      return message.reply("❌ Tu dois être staff pour envoyer le panel ticket.");
+    }
+
+    return sendTicketPanel(message.channel);
+  }
+
+  if (isStaff(message.member)) return;
+
+  if (/(discord\.gg|discord\.com\/invite|discordapp\.com\/invite)/i.test(message.content)) {
+    await message.delete().catch(() => {});
+    await message.member.timeout(15 * 60 * 1000, "Pub Discord interdite").catch(() => {});
+    return sendLog(message.guild, "🚫 Pub Discord bloquée", `${message.author.tag} a envoyé une invitation dans ${message.channel}.`, 0xff0000);
+  }
+
+  if (message.mentions.everyone || message.mentions.users.size >= 5 || message.mentions.roles.size >= 3) {
+    await message.delete().catch(() => {});
+    await message.member.timeout(20 * 60 * 1000, "Mass mention").catch(() => {});
+    return sendLog(message.guild, "🚨 Anti-mass mention", `${message.author.tag} a fait trop de mentions.`, 0xff0000);
+  }
+
+  const now = Date.now();
+  const id = message.author.id;
+  const list = (spamMap.get(id) || []).filter(t => now - t < 5000);
+
+  list.push(now);
+  spamMap.set(id, list);
+
+  if (list.length >= 5) {
+    await message.delete().catch(() => {});
+    await message.member.timeout(10 * 60 * 1000, "Spam rapide").catch(() => {});
+    return sendLog(message.guild, "⚠️ Anti-spam", `${message.author.tag} a spam.`, 0xffaa00);
+  }
+});
+
+client.on("guildMemberAdd", async (member) => {
+  const now = Date.now();
+
+  joinTimes.push(now);
+  while (joinTimes.length && now - joinTimes[0] > 30000) joinTimes.shift();
+
+  await sendLog(member.guild, "👤 Nouveau membre", `${member.user.tag} a rejoint le serveur.`, 0x00ff00);
+
+  const age = now - member.user.createdTimestamp;
+  const sevenDays = 7 * 24 * 60 * 60 * 1000;
+
+  if (age < sevenDays) {
+    await sendLog(member.guild, "🔒 Anti-alt", `${member.user.tag} a un compte de moins de 7 jours.`, 0xff0000);
+  }
+
+  if (joinTimes.length >= 8) {
+    await sendLog(member.guild, "🚨 ALERTE RAID", `${joinTimes.length} membres ont rejoint en 30 secondes.`, 0xff0000);
+  }
+});
+
+client.on("guildMemberRemove", async (member) => {
+  await sendLog(member.guild, "📤 Départ", `${member.user.tag} a quitté le serveur.`, 0xffaa00);
 });
 
 async function postRolesPanel(channel) {
@@ -153,6 +346,24 @@ async function postRolesPanel(channel) {
 
 client.on("interactionCreate", async (interaction) => {
   if (!interaction.isButton()) return;
+
+  if (interaction.customId.startsWith("ticket_")) {
+    const type = interaction.customId.replace("ticket_", "");
+    return createTicket(interaction, type);
+  }
+
+  if (interaction.customId === "close_ticket") {
+    if (!isStaff(interaction.member)) {
+      return interaction.reply({ content: "❌ Seul le staff peut fermer ce ticket.", ephemeral: true });
+    }
+
+    await interaction.reply("🔒 Ticket fermé dans 5 secondes.");
+    await sendLog(interaction.guild, "🔒 Ticket fermé", `${interaction.user.tag} a fermé ${interaction.channel}.`, 0xffaa00);
+
+    return setTimeout(() => {
+      interaction.channel.delete().catch(() => {});
+    }, 5000);
+  }
 
   const roleNames = {
     role_playmaker: "🏀 Playmaker",
@@ -216,10 +427,7 @@ async function checkNBA2KNews(firstStart = false) {
       .setTimestamp();
 
     const button = new ActionRowBuilder().addComponents(
-      new ButtonBuilder()
-        .setLabel("Lire l’article complet")
-        .setStyle(ButtonStyle.Link)
-        .setURL(item.link)
+      new ButtonBuilder().setLabel("Lire l’article complet").setStyle(ButtonStyle.Link).setURL(item.link)
     );
 
     await channel.send({ embeds: [embed], components: [button] });
@@ -275,10 +483,7 @@ async function checkTwitchLive() {
         .setTimestamp();
 
       const button = new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-          .setLabel("Rejoindre le live")
-          .setStyle(ButtonStyle.Link)
-          .setURL(`https://www.twitch.tv/${TWITCH_USERNAME}`)
+        new ButtonBuilder().setLabel("Rejoindre le live").setStyle(ButtonStyle.Link).setURL(`https://www.twitch.tv/${TWITCH_USERNAME}`)
       );
 
       await channel.send({
@@ -288,9 +493,7 @@ async function checkTwitchLive() {
       });
     }
 
-    if (!live && wasLive) {
-      wasLive = false;
-    }
+    if (!live && wasLive) wasLive = false;
   } catch (err) {
     console.log("Erreur Twitch :", err.message);
     twitchToken = null;
@@ -298,7 +501,7 @@ async function checkTwitchLive() {
 }
 
 client.once("ready", async () => {
-  console.log(`✅ Premier bot connecté : ${client.user.tag}`);
+  console.log(`✅ Bot complet connecté : ${client.user.tag}`);
 
   await postReglement();
   await checkNBA2KNews(false);
@@ -308,3 +511,4 @@ client.once("ready", async () => {
 });
 
 client.login(process.env.TOKEN);
+```
