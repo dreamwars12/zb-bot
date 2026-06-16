@@ -1,4 +1,3 @@
-```js
 const {
   Client,
   GatewayIntentBits,
@@ -45,7 +44,6 @@ let postedNews = new Set();
 let twitchToken = null;
 let wasLive = false;
 let spamMap = new Map();
-let joinTimes = [];
 
 function isStaff(member) {
   if (!member) return false;
@@ -54,6 +52,8 @@ function isStaff(member) {
 }
 
 async function sendLog(guild, title, description, color = 0x8b00ff) {
+  if (!LOG_CHANNEL_ID) return;
+
   const channel = await guild.channels.fetch(LOG_CHANNEL_ID).catch(() => null);
   if (!channel) return;
 
@@ -62,7 +62,7 @@ async function sendLog(guild, title, description, color = 0x8b00ff) {
     .setDescription(description)
     .setColor(color)
     .setTimestamp()
-    .setFooter({ text: "Le Terrain des Rois • Sécurité" });
+    .setFooter({ text: "Le Terrain des Rois • Logs" });
 
   channel.send({ embeds: [embed] }).catch(() => {});
 }
@@ -80,19 +80,30 @@ function cleanText(text) {
 
 function translateTitle(title) {
   const t = title.toLowerCase();
+
   if (t.includes("patch notes")) return "Notes de mise à jour NBA 2K26";
   if (t.includes("season") && t.includes("courtside report")) return "Rapport officiel de saison NBA 2K26";
   if (t.includes("festival")) return "Événement spécial NBA 2K26";
   if (t.includes("event")) return "Nouvel événement NBA 2K26";
+
   return title;
 }
 
 function explainNews(title, text) {
   const c = `${title} ${text}`.toLowerCase();
 
-  if (c.includes("patch") || c.includes("notes")) return "Mise à jour : corrections, gameplay, bugs ou stabilité.";
-  if (c.includes("season")) return "Nouvelle saison : récompenses, niveaux, événements, vêtements ou contenus MyCAREER/MyTEAM.";
-  if (c.includes("festival") || c.includes("event")) return "Événement limité : XP, VC, récompenses ou défis.";
+  if (c.includes("patch") || c.includes("notes")) {
+    return "Mise à jour : corrections, gameplay, bugs ou stabilité.";
+  }
+
+  if (c.includes("season")) {
+    return "Nouvelle saison : récompenses, niveaux, événements, vêtements ou contenus MyCAREER/MyTEAM.";
+  }
+
+  if (c.includes("festival") || c.includes("event")) {
+    return "Événement limité : XP, VC, récompenses ou défis.";
+  }
+
   if (c.includes("myteam")) return "Actu MyTEAM : cartes, packs, défis ou récompenses.";
   if (c.includes("mycareer") || c.includes("city")) return "Actu MaCarrière / Ville : quêtes, récompenses ou événements.";
 
@@ -123,7 +134,7 @@ async function postReglement() {
       "✅ **Clique sur ✅ pour accepter le règlement et débloquer les salons.**"
     )
     .setColor(0x8b00ff)
-    .setFooter({ text: "Le Terrain des Rois • Vérification officielle" })
+    .setFooter({ text: "Le Terrain des Rois • Règlement officiel" })
     .setTimestamp();
 
   const msg = await channel.send({ embeds: [embed] });
@@ -134,7 +145,11 @@ client.on("messageReactionAdd", async (reaction, user) => {
   if (user.bot) return;
 
   if (reaction.partial) {
-    try { await reaction.fetch(); } catch { return; }
+    try {
+      await reaction.fetch();
+    } catch {
+      return;
+    }
   }
 
   if (reaction.message.channel.id !== REGLEMENT_CHANNEL_ID) return;
@@ -176,7 +191,7 @@ async function createTicket(interaction, type) {
   const category = await guild.channels.fetch(TICKET_CATEGORY_ID).catch(() => null);
   if (!category) {
     return interaction.reply({
-      content: "❌ Catégorie ticket introuvable. Vérifie `TICKET_CATEGORY_ID`.",
+      content: "❌ Catégorie ticket introuvable. Vérifie TICKET_CATEGORY_ID.",
       ephemeral: true
     });
   }
@@ -264,16 +279,16 @@ async function createTicket(interaction, type) {
 client.on("messageCreate", async (message) => {
   if (message.author.bot || !message.guild) return;
 
-  if (message.content.toLowerCase() === "!rolespanel") {
-    return postRolesPanel(message.channel);
-  }
-
   if (message.content.toLowerCase() === "!ticketpanel") {
     if (!isStaff(message.member)) {
       return message.reply("❌ Tu dois être staff pour envoyer le panel ticket.");
     }
 
     return sendTicketPanel(message.channel);
+  }
+
+  if (message.content.toLowerCase() === "!rolespanel") {
+    return postRolesPanel(message.channel);
   }
 
   if (isStaff(message.member)) return;
@@ -305,22 +320,13 @@ client.on("messageCreate", async (message) => {
 });
 
 client.on("guildMemberAdd", async (member) => {
-  const now = Date.now();
-
-  joinTimes.push(now);
-  while (joinTimes.length && now - joinTimes[0] > 30000) joinTimes.shift();
+  const age = Date.now() - member.user.createdTimestamp;
+  const sevenDays = 7 * 24 * 60 * 60 * 1000;
 
   await sendLog(member.guild, "👤 Nouveau membre", `${member.user.tag} a rejoint le serveur.`, 0x00ff00);
 
-  const age = now - member.user.createdTimestamp;
-  const sevenDays = 7 * 24 * 60 * 60 * 1000;
-
   if (age < sevenDays) {
     await sendLog(member.guild, "🔒 Anti-alt", `${member.user.tag} a un compte de moins de 7 jours.`, 0xff0000);
-  }
-
-  if (joinTimes.length >= 8) {
-    await sendLog(member.guild, "🚨 ALERTE RAID", `${joinTimes.length} membres ont rejoint en 30 secondes.`, 0xff0000);
   }
 });
 
@@ -360,9 +366,11 @@ client.on("interactionCreate", async (interaction) => {
     await interaction.reply("🔒 Ticket fermé dans 5 secondes.");
     await sendLog(interaction.guild, "🔒 Ticket fermé", `${interaction.user.tag} a fermé ${interaction.channel}.`, 0xffaa00);
 
-    return setTimeout(() => {
+    setTimeout(() => {
       interaction.channel.delete().catch(() => {});
     }, 5000);
+
+    return;
   }
 
   const roleNames = {
@@ -511,4 +519,3 @@ client.once("ready", async () => {
 });
 
 client.login(process.env.TOKEN);
-```
