@@ -38,6 +38,10 @@ const TICKET_CATEGORY_ID = process.env.TICKET_CATEGORY_ID;
 const LOG_CHANNEL_ID = process.env.LOG_CHANNEL_ID;
 const TICKET_BANNER_URL = process.env.TICKET_BANNER_URL;
 
+const EVENT_CHANNEL_ID = process.env.EVENT_CHANNEL_ID;
+const EVENT_PING_ROLE_ID = process.env.EVENT_PING_ROLE_ID;
+const USE_EVERYONE_EVENT = process.env.USE_EVERYONE_EVENT === "true";
+
 const TWITCH_USERNAME = process.env.TWITCH_USERNAME;
 const TWITCH_CLIENT_ID = process.env.TWITCH_CLIENT_ID;
 const TWITCH_CLIENT_SECRET = process.env.TWITCH_CLIENT_SECRET;
@@ -51,6 +55,12 @@ function isStaff(member) {
   if (!member) return false;
   return member.permissions.has(PermissionsBitField.Flags.Administrator) ||
     member.roles.cache.has(STAFF_ROLE_ID);
+}
+
+function getEventPing() {
+  if (USE_EVERYONE_EVENT) return "@everyone";
+  if (EVENT_PING_ROLE_ID) return `<@&${EVENT_PING_ROLE_ID}>`;
+  return "";
 }
 
 async function sendLog(guild, title, description, color) {
@@ -299,6 +309,59 @@ async function postRolesPanel(channel) {
   await channel.send({ embeds: [embed], components: [row] });
 }
 
+async function sendAutoQuestion() {
+  const channel = await client.channels.fetch(EVENT_CHANNEL_ID).catch(() => null);
+  if (!channel) return;
+
+  const questions = [
+    "Tu joues quel poste sur NBA 2K26 ?",
+    "Drop ton build en screen 👇",
+    "Qui est chaud Pro-Am ce soir ?",
+    "Tu préfères dunker ou shooter à 3 points ?",
+    "C’est qui ton joueur NBA préféré ?",
+    "Tu joues plutôt Park, REC ou Pro-Am ?",
+    "Ton meilleur insigne sur NBA 2K c’est quoi ?",
+    "Tu préfères meneur dribbleur ou ailier shooter ?"
+  ];
+
+  const q = questions[Math.floor(Math.random() * questions.length)];
+
+  const embed = new EmbedBuilder()
+    .setTitle("🏀 QUESTION DU JOUR")
+    .setDescription("**" + q + "**\n\nRéponds dans le chat 👇")
+    .setColor(0x8b00ff)
+    .setFooter({ text: "Le Terrain des Rois • Activité auto" })
+    .setTimestamp();
+
+  await channel.send({ content: getEventPing(), embeds: [embed] });
+}
+
+async function sendMiniEvent() {
+  const channel = await client.channels.fetch(EVENT_CHANNEL_ID).catch(() => null);
+  if (!channel) return;
+
+  const events = [
+    "🎬 Drop ton meilleur clip NBA 2K, le meilleur gagne un rôle spécial 24h 👑",
+    "🏀 Mini-event : qui est chaud pour un tournoi 1v1 ce soir ?",
+    "🔥 Envoie ton meilleur build, le plus propre gagne 👑",
+    "🎯 Défi du jour : poste ton meilleur shoot clutch !",
+    "👥 Objectif serveur : invite un pote, on vise les 100 membres !",
+    "💎 Montre ton outfit NBA 2K, le plus stylé gagne 👑",
+    "📸 Envoie ton meilleur screen en jeu, le staff choisit le gagnant."
+  ];
+
+  const event = events[Math.floor(Math.random() * events.length)];
+
+  const embed = new EmbedBuilder()
+    .setTitle("🎉 MINI EVENT")
+    .setDescription("**" + event + "**\n\nParticipe maintenant 👇")
+    .setColor(0x9b00ff)
+    .setFooter({ text: "Le Terrain des Rois • Event auto" })
+    .setTimestamp();
+
+  await channel.send({ content: getEventPing(), embeds: [embed] });
+}
+
 client.on("messageCreate", async (message) => {
   if (message.author.bot || !message.guild) return;
 
@@ -307,7 +370,21 @@ client.on("messageCreate", async (message) => {
     return sendTicketPanel(message.channel);
   }
 
-  if (message.content.toLowerCase() === "!rolespanel") return postRolesPanel(message.channel);
+  if (message.content.toLowerCase() === "!rolespanel") {
+    if (!isStaff(message.member)) return message.reply("❌ Tu dois être staff.");
+    return postRolesPanel(message.channel);
+  }
+
+  if (message.content.toLowerCase() === "!question") {
+    if (!isStaff(message.member)) return message.reply("❌ Tu dois être staff.");
+    return sendAutoQuestion();
+  }
+
+  if (message.content.toLowerCase() === "!event") {
+    if (!isStaff(message.member)) return message.reply("❌ Tu dois être staff.");
+    return sendMiniEvent();
+  }
+
   if (isStaff(message.member)) return;
 
   if (/(discord\.gg|discord\.com\/invite|discordapp\.com\/invite)/i.test(message.content)) {
@@ -337,7 +414,9 @@ client.on("interactionCreate", async (interaction) => {
   if (!interaction.isButton()) return;
 
   if (interaction.customId === "close_ticket") {
-    if (!isStaff(interaction.member)) return interaction.reply({ content: "❌ Seul le staff peut fermer ce ticket.", ephemeral: true });
+    if (!isStaff(interaction.member)) {
+      return interaction.reply({ content: "❌ Seul le staff peut fermer ce ticket.", ephemeral: true });
+    }
 
     await interaction.reply("🔒 Ticket fermé dans 5 secondes.");
     await sendLog(interaction.guild, "🔒 Ticket fermé", interaction.user.tag + " a fermé " + interaction.channel.toString() + ".", 0xffaa00);
@@ -438,15 +517,36 @@ async function checkTwitchLive() {
         .setTimestamp();
 
       const button = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setLabel("Rejoindre le live").setStyle(ButtonStyle.Link).setURL("https://www.twitch.tv/" + TWITCH_USERNAME)
+        new ButtonBuilder()
+          .setLabel("Rejoindre le live")
+          .setStyle(ButtonStyle.Link)
+          .setURL("https://www.twitch.tv/" + TWITCH_USERNAME)
       );
 
-      await channel.send({ content: "@everyone 🔴 **LIVE LANCÉ !**", embeds: [embed], components: [button] });
+      await channel.send({
+        content: "@everyone 🔴 **LIVE LANCÉ !**",
+        embeds: [embed],
+        components: [button]
+      });
+
       console.log("✅ Annonce Twitch envoyée");
     }
 
     if (!live && wasLive) {
       wasLive = false;
+
+      const channel = await client.channels.fetch(ANNOUNCE_CHANNEL_ID).catch(() => null);
+      if (channel) {
+        const embed = new EmbedBuilder()
+          .setTitle("⚫ LIVE TERMINÉ")
+          .setDescription("Le live Twitch de **" + TWITCH_USERNAME + "** est terminé.\nMerci à ceux qui sont passés 💜")
+          .setColor(0x2b2d31)
+          .setFooter({ text: "Le Terrain des Rois • Twitch" })
+          .setTimestamp();
+
+        await channel.send({ embeds: [embed] }).catch(() => {});
+      }
+
       console.log("🔴 Live terminé");
     }
   } catch (err) {
@@ -461,6 +561,7 @@ client.once("ready", async () => {
   console.log("TWITCH_CLIENT_ID OK =", !!TWITCH_CLIENT_ID);
   console.log("TWITCH_CLIENT_SECRET OK =", !!TWITCH_CLIENT_SECRET);
   console.log("ANNOUNCE_CHANNEL_ID =", ANNOUNCE_CHANNEL_ID);
+  console.log("EVENT_CHANNEL_ID =", EVENT_CHANNEL_ID);
 
   await postReglement();
   await checkNBA2KNews(false);
@@ -468,6 +569,9 @@ client.once("ready", async () => {
 
   setInterval(() => checkNBA2KNews(false), 10 * 60 * 1000);
   setInterval(checkTwitchLive, 60 * 1000);
+
+  setInterval(sendAutoQuestion, 6 * 60 * 60 * 1000);
+  setInterval(sendMiniEvent, 12 * 60 * 60 * 1000);
 });
 
 client.login(process.env.TOKEN);
