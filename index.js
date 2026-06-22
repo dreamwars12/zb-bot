@@ -580,7 +580,7 @@ client.once("ready", async () => {
   setInterval(() => checkNBA2KNews(false), 10 * 60 * 1000);
   setInterval(checkTwitchLive, 60 * 1000);
 
-  setInterval(sendAutoQuestion, 4 * 60 * 60 * 1000);
+  setInterval(sendMiniEvent, 24 * 60 * 60 * 1000);
   setInterval(sendMiniEvent, 8 * 60 * 60 * 1000);
   setInterval(sendBusinessPost, 24 * 60 * 60 * 1000);
 });
